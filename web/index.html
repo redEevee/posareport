@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>커머스 광고 리포트</title>
+  <style>
+    :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin: 0; background: #0b1020; color: #f2f5ff; }
+    main { max-width: 1040px; margin: auto; padding: 52px 24px; }
+    .eyebrow { color: #8ba4ff; font-size: 14px; font-weight: 700; letter-spacing: .08em; }
+    h1 { font-size: clamp(30px, 5vw, 48px); margin: 8px 0; } p { color: #b6c0da; }
+    .grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:14px; margin:32px 0; }
+    .card { background:#151d34; border:1px solid #263354; border-radius:16px; padding:20px; }
+    .label { color:#99a8cb; font-size:13px; } .number { font-size:28px; font-weight:800; margin-top:8px; }
+    table { width:100%; border-collapse:collapse; background:#151d34; border-radius:16px; overflow:hidden; }
+    th, td { padding:16px; text-align:left; border-bottom:1px solid #263354; } th { color:#99a8cb; font-size:13px; }
+    .note { margin-top:24px; padding:16px; background:#202a48; border-radius:12px; color:#cbd5f4; }
+    @media (max-width:700px) { .grid { grid-template-columns:repeat(2, 1fr); } }
+  </style>
+</head>
+<body><main>
+  <div class="eyebrow">CAFE24 × AD PERFORMANCE</div>
+  <h1>오늘의 광고 성과</h1>
+  <p id="updated">데이터를 불러오는 중입니다.</p>
+  <section class="grid" id="summary"></section>
+  <h2>매체별 성과</h2>
+  <table><thead><tr><th>매체</th><th>광고비</th><th>주문</th><th>매출</th><th>ROAS</th></tr></thead><tbody id="channels"></tbody></table>
+  <div class="note" id="note"></div>
+</main>
+<script>
+  const won = value => new Intl.NumberFormat('ko-KR', {style:'currency', currency:'KRW', maximumFractionDigits:0}).format(value);
+  const value = number => new Intl.NumberFormat('ko-KR').format(number);
+  fetch('/api/report').then(r => r.json()).then(report => {
+    document.querySelector('#updated').textContent = `${report.updated_at} 기준 · 카페24 매출 기준`;
+    const cards = [['광고비', won(report.summary.spend)], ['매출', won(report.summary.revenue)], ['주문', value(report.summary.orders)+'건'], ['ROAS', report.summary.roas+'배']];
+    document.querySelector('#summary').innerHTML = cards.map(([label, number]) => `<article class="card"><div class="label">${label}</div><div class="number">${number}</div></article>`).join('');
+    document.querySelector('#channels').innerHTML = report.channels.map(row => `<tr><td>${row.name}</td><td>${won(row.spend)}</td><td>${value(row.orders)}건</td><td>${won(row.revenue)}</td><td>${row.roas}배</td></tr>`).join('');
+    document.querySelector('#note').textContent = report.mode === 'sample' ? '현재는 샘플 데이터입니다. 카페24 주문 API와 광고 API를 연결하면 실데이터로 자동 전환됩니다.' : '실데이터가 연결되어 있습니다.';
+  });
+</script></body></html>
