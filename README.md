@@ -37,6 +37,10 @@ https://<서비스명>.onrender.com/auth/cafe24/callback
 
 Render에는 `CAFE24_CLIENT_ID`와 `CAFE24_CLIENT_SECRET`을 환경변수로 입력합니다. `.env` 파일은 올리지 않습니다.
 
+## 실제 주문 데이터 연결
+
+카페24 앱 설정을 저장하고 `https://report.posareport.store/auth/cafe24/connect`를 열어 인증을 완료하면 최근 30일 주문을 집계합니다. 고객 이름, 주소, 연락처는 요청하거나 저장하지 않습니다. 주문 API의 access token은 2시간, refresh token은 14일 동안 유효하므로 운영 환경에서는 Render Disk 또는 별도 데이터베이스를 연결해야 배포 후에도 인증 정보를 유지할 수 있습니다.
+
 ## posareport.store 연결값
 
 리포트 플랫폼은 `report.posareport.store`를 사용하도록 준비되어 있습니다.
