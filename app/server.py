@@ -9,8 +9,12 @@ from pathlib import Path
 import secrets
 from urllib.parse import parse_qs, urlparse
 
-from app.connectors.cafe24 import Cafe24Client, load_local_environment, sync_last_30_days
-from app.store import get_json
+try:
+    from app.connectors.cafe24 import Cafe24Client, load_local_environment, sync_last_30_days
+    from app.store import get_json
+except ModuleNotFoundError:
+    from connectors.cafe24 import Cafe24Client, load_local_environment, sync_last_30_days
+    from store import get_json
 
 
 ROOT = Path(__file__).resolve().parent.parent
