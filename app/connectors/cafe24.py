@@ -9,7 +9,10 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from app.store import get_json, set_json
+try:
+    from app.store import get_json, set_json
+except ModuleNotFoundError:
+    from store import get_json, set_json
 
 
 def load_local_environment():
