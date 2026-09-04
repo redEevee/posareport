@@ -26,15 +26,27 @@ def load_local_environment():
 
 
 class Cafe24Client:
-    def __init__(self):
+    def __init__(self, mall_id=None):
         load_local_environment()
-        self.mall_id = os.environ.get("CAFE24_MALL_ID")
+        self.mall_id = (mall_id or os.environ.get("CAFE24_MALL_ID") or "").lower()
         self.client_id = os.environ.get("CAFE24_CLIENT_ID")
         self.client_secret = os.environ.get("CAFE24_CLIENT_SECRET")
         self.redirect_uri = os.environ.get("CAFE24_REDIRECT_URI")
 
     def is_configured(self):
         return bool(self.mall_id and self.client_id and self.client_secret and self.redirect_uri)
+
+    @property
+    def storage_suffix(self):
+        return self.mall_id
+
+    @property
+    def token_key(self):
+        return f"cafe24_token:{self.storage_suffix}"
+
+    @property
+    def report_key(self):
+        return f"report:{self.storage_suffix}"
 
     def authorization_url(self, state):
         if not self.is_configured():
@@ -58,14 +70,17 @@ class Cafe24Client:
         )
         with urlopen(request, timeout=20) as response:
             token = json.load(response)
-        set_json("cafe24_token", token)
+        set_json(self.token_key, token)
         return token
 
     def exchange_code(self, code):
         return self._token_request({"grant_type": "authorization_code", "code": code, "redirect_uri": self.redirect_uri})
 
     def _access_token(self):
-        token = get_json("cafe24_token")
+        token = get_json(self.token_key)
+        # Keep the original single-store connection usable after this upgrade.
+        if not token and self.mall_id == os.environ.get("CAFE24_MALL_ID", "").lower():
+            token = get_json("cafe24_token")
         if not token:
             raise RuntimeError("카페24 인증을 먼저 완료해 주세요.")
         try:
@@ -122,8 +137,10 @@ def report_from_orders(orders):
     }
 
 
-def sync_last_30_days():
+def sync_last_30_days(mall_id=None):
     end_date = date.today()
-    report = report_from_orders(Cafe24Client().fetch_orders(end_date - timedelta(days=29), end_date))
-    set_json("report", report)
+    client = Cafe24Client(mall_id)
+    report = report_from_orders(client.fetch_orders(end_date - timedelta(days=29), end_date))
+    report["mall_id"] = client.mall_id
+    set_json(client.report_key, report)
     return report
