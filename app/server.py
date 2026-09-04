@@ -1,6 +1,6 @@
 """Commerce reporting MVP server."""
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -20,7 +20,6 @@ except ModuleNotFoundError:
 
 ROOT = Path(__file__).resolve().parent.parent
 EVENTS_FILE = ROOT / "data" / "events.jsonl"
-OAUTH_STATES = {}
 load_local_environment()
 
 SAMPLE_ROWS = [
@@ -74,6 +73,34 @@ def add_connected_mall(mall_id):
         set_json("cafe24_malls", sorted(malls))
 
 
+def create_oauth_state(mall_id):
+    """Persist short-lived OAuth state so a Render worker restart does not break login."""
+    state = secrets.token_urlsafe(32)
+    states = get_json("cafe24_oauth_states", {})
+    now = datetime.now(timezone.utc)
+    states = {
+        key: value for key, value in states.items()
+        if datetime.fromisoformat(value["created_at"]).replace(tzinfo=timezone.utc) > now - timedelta(minutes=15)
+    }
+    states[state] = {"mall_id": mall_id, "created_at": now.isoformat()}
+    set_json("cafe24_oauth_states", states)
+    return state
+
+
+def consume_oauth_state(state):
+    states = get_json("cafe24_oauth_states", {})
+    payload = states.pop(state, None)
+    set_json("cafe24_oauth_states", states)
+    if not payload:
+        return None
+    try:
+        created_at = datetime.fromisoformat(payload["created_at"])
+        created_at = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+    except (KeyError, TypeError, ValueError):
+        return None
+    return payload.get("mall_id") if created_at > datetime.now(timezone.utc) - timedelta(minutes=15) else None
+
+
 class Handler(BaseHTTPRequestHandler):
     def send_json(self, value, status=HTTPStatus.OK):
         payload = json.dumps(value, ensure_ascii=False).encode("utf-8")
@@ -111,8 +138,7 @@ class Handler(BaseHTTPRequestHandler):
             if not valid_mall_id(mall_id):
                 self.send_json({"error": "카페24 쇼핑몰 ID를 영문 소문자·숫자로 입력해 주세요."}, HTTPStatus.BAD_REQUEST)
                 return
-            state = secrets.token_urlsafe(32)
-            OAUTH_STATES[state] = mall_id
+            state = create_oauth_state(mall_id)
             try:
                 self.redirect(Cafe24Client(mall_id).authorization_url(state))
             except RuntimeError as error:
@@ -121,9 +147,9 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/auth/cafe24/callback":
             query = parse_qs(parsed.query)
             state, code = query.get("state", [None])[0], query.get("code", [None])[0]
-            mall_id = OAUTH_STATES.pop(state, None)
+            mall_id = consume_oauth_state(state)
             if not mall_id or not code:
-                self.send_json({"error": "인증 요청을 확인할 수 없습니다."}, HTTPStatus.BAD_REQUEST)
+                self.send_json({"error": "인증 요청이 만료되었거나 직접 열린 주소입니다. 리포트 첫 화면에서 쇼핑몰 ID를 입력한 뒤 ‘이 쇼핑몰 연결’을 다시 눌러 주세요."}, HTTPStatus.BAD_REQUEST)
                 return
             OAUTH_STATES.remove(state)
             try:
