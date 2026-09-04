@@ -22,7 +22,7 @@ python3 app/server.py
 1. 카페24 개발자센터에서 `ntonmaster` 쇼핑몰용 앱을 만들고 주문 조회 권한을 부여합니다.
 2. 앱 기본정보의 **Redirect URI**에 배포 도메인의 `https://<내-도메인>/auth/cafe24/callback`을 등록합니다. HTTPS와 도메인명이 필수이며, 코드의 `CAFE24_REDIRECT_URI`와 한 글자까지 같아야 합니다.
 3. `.env.example`을 `.env`로 복사한 후 카페24 앱 정보와 광고 매체 자격 증명을 입력합니다.
-4. 배포 후 `https://<내-도메인>/auth/cafe24/connect`로 접속해 카페24 인증을 완료합니다.
+4. 배포 후 대시보드에서 카페24 쇼핑몰 ID를 입력하고 연결합니다. 쇼핑몰마다 관리자 계정으로 인증하면 주문 데이터와 토큰이 분리 저장됩니다.
 5. 광고 매체별 API 커넥터를 구현한 뒤 일일 동기화 작업을 배포합니다.
 
 `CAFE24_ACCESS_TOKEN`, 광고 API 비밀키는 브라우저 스크립트나 Git 저장소에 넣으면 안 됩니다.
@@ -39,7 +39,7 @@ Render에는 `CAFE24_CLIENT_ID`와 `CAFE24_CLIENT_SECRET`을 환경변수로 입
 
 ## 실제 주문 데이터 연결
 
-카페24 앱 설정을 저장하고 `https://report.posareport.store/auth/cafe24/connect`를 열어 인증을 완료하면 최근 30일 주문을 집계합니다. 고객 이름, 주소, 연락처는 요청하거나 저장하지 않습니다. 주문 API의 access token은 2시간, refresh token은 14일 동안 유효하므로 운영 환경에서는 Render Disk 또는 별도 데이터베이스를 연결해야 배포 후에도 인증 정보를 유지할 수 있습니다.
+카페24 앱 설정을 저장하고 대시보드의 쇼핑몰 ID 입력칸에서 연결할 쇼핑몰을 선택해 인증을 완료하면 최근 30일 주문을 집계합니다. 고객 이름, 주소, 연락처는 요청하거나 저장하지 않습니다. 주문 API의 access token은 2시간, refresh token은 14일 동안 유효하므로 운영 환경에서는 Render Disk 또는 별도 데이터베이스를 연결해야 배포 후에도 인증 정보를 유지할 수 있습니다.
 
 ## posareport.store 연결값
 
