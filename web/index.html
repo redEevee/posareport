@@ -16,8 +16,10 @@
     table { width:100%; border-collapse:collapse; background:#151d34; border-radius:16px; overflow:hidden; }
     th, td { padding:16px; text-align:left; border-bottom:1px solid #263354; } th { color:#99a8cb; font-size:13px; }
     .note { margin-top:24px; padding:16px; background:#202a48; border-radius:12px; color:#cbd5f4; }
-    .actions { display:flex; gap:10px; align-items:center; margin:18px 0 0; }
-    button { border:0; border-radius:9px; padding:10px 14px; color:#0b1020; background:#8ba4ff; font-weight:800; cursor:pointer; }
+    .actions { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:18px 0 0; }
+    button, input, select { border:0; border-radius:9px; padding:10px 14px; font:inherit; }
+    button { color:#0b1020; background:#8ba4ff; font-weight:800; cursor:pointer; }
+    input, select { color:#f2f5ff; background:#151d34; border:1px solid #52658f; }
     .status { color:#b6c0da; font-size:14px; }
     @media (max-width:700px) { .grid { grid-template-columns:repeat(2, 1fr); } }
   </style>
@@ -26,7 +28,7 @@
   <div class="eyebrow">CAFE24 × AD PERFORMANCE</div>
   <h1>오늘의 광고 성과</h1>
   <p id="updated">데이터를 불러오는 중입니다.</p>
-  <div class="actions"><button id="connect">카페24 연결</button><span class="status" id="status"></span></div>
+  <div class="actions"><select id="mallSelect" aria-label="연결한 쇼핑몰 선택"></select><input id="mallId" maxlength="50" placeholder="새 카페24 쇼핑몰 ID"><button id="connect">이 쇼핑몰 연결</button><span class="status" id="status"></span></div>
   <section class="grid" id="summary"></section>
   <h2>매체별 성과</h2>
   <table><thead><tr><th>매체</th><th>광고비</th><th>주문</th><th>매출</th><th>ROAS</th></tr></thead><tbody id="channels"></tbody></table>
@@ -35,18 +37,34 @@
 <script>
   const won = value => new Intl.NumberFormat('ko-KR', {style:'currency', currency:'KRW', maximumFractionDigits:0}).format(value);
   const value = number => new Intl.NumberFormat('ko-KR').format(number);
-  fetch('/api/report').then(r => r.json()).then(report => {
+  const params = new URLSearchParams(location.search);
+  let activeMallId = params.get('mall_id') || '';
+  const mallSelect = document.querySelector('#mallSelect');
+  const mallInput = document.querySelector('#mallId');
+  const reportUrl = path => `${path}?mall_id=${encodeURIComponent(activeMallId)}`;
+  function showReport() { fetch(reportUrl('/api/report')).then(r => r.json()).then(report => {
     document.querySelector('#updated').textContent = `${report.updated_at} 기준 · 카페24 매출 기준`;
     const cards = [['광고비', won(report.summary.spend)], ['매출', won(report.summary.revenue)], ['주문', value(report.summary.orders)+'건'], ['ROAS', report.summary.roas+'배']];
     document.querySelector('#summary').innerHTML = cards.map(([label, number]) => `<article class="card"><div class="label">${label}</div><div class="number">${number}</div></article>`).join('');
     document.querySelector('#channels').innerHTML = report.channels.map(row => `<tr><td>${row.name}</td><td>${won(row.spend)}</td><td>${value(row.orders)}건</td><td>${won(row.revenue)}</td><td>${row.roas}배</td></tr>`).join('');
     document.querySelector('#note').textContent = report.note || '실데이터가 연결되어 있습니다.';
-  });
-  fetch('/api/status').then(r => r.json()).then(status => {
+  }); }
+  function showStatus() { fetch(reportUrl('/api/status')).then(r => r.json()).then(status => {
     const button = document.querySelector('#connect');
-    button.textContent = status.cafe24_connected ? '카페24 연결됨' : '카페24 연결';
-    button.disabled = status.cafe24_connected;
-    document.querySelector('#status').textContent = status.cafe24_connected ? '실제 주문 데이터를 불러왔습니다.' : '연결 후 최근 30일 주문 데이터를 자동으로 집계합니다.';
+    button.textContent = status.cafe24_connected ? '다른 쇼핑몰 연결' : '이 쇼핑몰 연결';
+    document.querySelector('#status').textContent = status.cafe24_connected ? `${status.mall_id} 주문 데이터가 연결되었습니다.` : '쇼핑몰마다 관리자 인증을 한 번씩 진행합니다.';
+  }); }
+  fetch('/api/malls').then(r => r.json()).then(data => {
+    activeMallId = activeMallId || data.default_mall_id || data.malls[0] || '';
+    mallSelect.innerHTML = data.malls.map(id => `<option value="${id}">${id}</option>`).join('');
+    mallSelect.value = activeMallId;
+    mallInput.value = activeMallId;
+    showReport(); showStatus();
   });
-  document.querySelector('#connect').addEventListener('click', () => location.href = '/auth/cafe24/connect');
+  mallSelect.addEventListener('change', () => { activeMallId = mallSelect.value; mallInput.value = activeMallId; showReport(); showStatus(); });
+  document.querySelector('#connect').addEventListener('click', () => {
+    const mallId = mallInput.value.trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9-]{1,49}$/.test(mallId)) return alert('카페24 쇼핑몰 ID를 영문 소문자·숫자로 입력해 주세요.');
+    location.href = `/auth/cafe24/connect?mall_id=${encodeURIComponent(mallId)}`;
+  });
 </script></body></html>
