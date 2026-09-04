@@ -1,6 +1,9 @@
 """Commerce reporting MVP server."""
 
+import base64
 from datetime import date, datetime, timedelta, timezone
+import hashlib
+import hmac
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -74,31 +77,32 @@ def add_connected_mall(mall_id):
 
 
 def create_oauth_state(mall_id):
-    """Persist short-lived OAuth state so a Render worker restart does not break login."""
-    state = secrets.token_urlsafe(32)
-    states = get_json("cafe24_oauth_states", {})
-    now = datetime.now(timezone.utc)
-    states = {
-        key: value for key, value in states.items()
-        if datetime.fromisoformat(value["created_at"]).replace(tzinfo=timezone.utc) > now - timedelta(minutes=15)
-    }
-    states[state] = {"mall_id": mall_id, "created_at": now.isoformat()}
-    set_json("cafe24_oauth_states", states)
-    return state
+    """Create a signed, short-lived OAuth state that survives a Render restart."""
+    issued_at = int(datetime.now(timezone.utc).timestamp())
+    payload = f"{mall_id}:{issued_at}".encode("utf-8")
+    encoded = base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+    signing_key = (os.environ.get("OAUTH_STATE_SECRET") or os.environ.get("CAFE24_CLIENT_SECRET") or "").encode("utf-8")
+    if not signing_key:
+        raise RuntimeError("카페24 앱 환경설정이 완료되지 않았습니다.")
+    signature = hmac.new(signing_key, encoded.encode("ascii"), hashlib.sha256).hexdigest()
+    return f"{encoded}.{signature}"
 
 
 def consume_oauth_state(state):
-    states = get_json("cafe24_oauth_states", {})
-    payload = states.pop(state, None)
-    set_json("cafe24_oauth_states", states)
-    if not payload:
+    if not state or "." not in state:
         return None
     try:
-        created_at = datetime.fromisoformat(payload["created_at"])
-        created_at = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
-    except (KeyError, TypeError, ValueError):
+        encoded, signature = state.rsplit(".", 1)
+        signing_key = (os.environ.get("OAUTH_STATE_SECRET") or os.environ.get("CAFE24_CLIENT_SECRET") or "").encode("utf-8")
+        expected = hmac.new(signing_key, encoded.encode("ascii"), hashlib.sha256).hexdigest()
+        if not signing_key or not hmac.compare_digest(signature, expected):
+            return None
+        padded = encoded + "=" * (-len(encoded) % 4)
+        mall_id, issued_at = base64.urlsafe_b64decode(padded).decode("utf-8").rsplit(":", 1)
+        created_at = datetime.fromtimestamp(int(issued_at), timezone.utc)
+    except (ValueError, UnicodeDecodeError):
         return None
-    return payload.get("mall_id") if created_at > datetime.now(timezone.utc) - timedelta(minutes=15) else None
+    return mall_id if valid_mall_id(mall_id) and created_at > datetime.now(timezone.utc) - timedelta(minutes=15) else None
 
 
 class Handler(BaseHTTPRequestHandler):
