@@ -7,19 +7,20 @@ import json
 import os
 from pathlib import Path
 import secrets
+import re
 from urllib.parse import parse_qs, urlparse
 
 try:
     from app.connectors.cafe24 import Cafe24Client, load_local_environment, sync_last_30_days
-    from app.store import get_json
+    from app.store import get_json, set_json
 except ModuleNotFoundError:
     from connectors.cafe24 import Cafe24Client, load_local_environment, sync_last_30_days
-    from store import get_json
+    from store import get_json, set_json
 
 
 ROOT = Path(__file__).resolve().parent.parent
 EVENTS_FILE = ROOT / "data" / "events.jsonl"
-OAUTH_STATES = set()
+OAUTH_STATES = {}
 load_local_environment()
 
 SAMPLE_ROWS = [
@@ -48,6 +49,29 @@ def sample_report():
         "channels": [{"name": name, "spend": sum(row["spend"] for row in rows), "orders": sum(row["orders"] for row in rows), "revenue": sum(row["revenue"] for row in rows), "roas": round(sum(row["revenue"] for row in rows) / sum(row["spend"] for row in rows), 2)} for name, rows in grouped.items()],
         "daily": SAMPLE_ROWS, "mode": "sample", "note": "카페24를 연결하면 실제 주문·매출 데이터로 전환됩니다.",
     }
+
+
+def valid_mall_id(value):
+    return bool(re.fullmatch(r"[a-z0-9][a-z0-9-]{1,49}", (value or "").lower()))
+
+
+def configured_mall_id():
+    return os.environ.get("CAFE24_MALL_ID", "").lower()
+
+
+def connected_malls():
+    malls = get_json("cafe24_malls", [])
+    default = configured_mall_id()
+    if default and default not in malls:
+        malls.append(default)
+    return sorted(set(malls))
+
+
+def add_connected_mall(mall_id):
+    malls = connected_malls()
+    if mall_id not in malls:
+        malls.append(mall_id)
+        set_json("cafe24_malls", sorted(malls))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -83,32 +107,51 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == "/auth/cafe24/connect":
+            mall_id = parse_qs(parsed.query).get("mall_id", [configured_mall_id()])[0].lower()
+            if not valid_mall_id(mall_id):
+                self.send_json({"error": "카페24 쇼핑몰 ID를 영문 소문자·숫자로 입력해 주세요."}, HTTPStatus.BAD_REQUEST)
+                return
             state = secrets.token_urlsafe(32)
-            OAUTH_STATES.add(state)
+            OAUTH_STATES[state] = mall_id
             try:
-                self.redirect(Cafe24Client().authorization_url(state))
+                self.redirect(Cafe24Client(mall_id).authorization_url(state))
             except RuntimeError as error:
                 self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
             return
         if parsed.path == "/auth/cafe24/callback":
             query = parse_qs(parsed.query)
             state, code = query.get("state", [None])[0], query.get("code", [None])[0]
-            if state not in OAUTH_STATES or not code:
+            mall_id = OAUTH_STATES.pop(state, None)
+            if not mall_id or not code:
                 self.send_json({"error": "인증 요청을 확인할 수 없습니다."}, HTTPStatus.BAD_REQUEST)
                 return
             OAUTH_STATES.remove(state)
             try:
-                Cafe24Client().exchange_code(code)
-                sync_last_30_days()
-                self.redirect("/?connected=cafe24")
+                Cafe24Client(mall_id).exchange_code(code)
+                add_connected_mall(mall_id)
+                sync_last_30_days(mall_id)
+                self.redirect(f"/?connected=cafe24&mall_id={mall_id}")
             except Exception as error:
                 self.send_json({"error": "카페24 연결에 실패했습니다.", "detail": str(error)}, HTTPStatus.BAD_GATEWAY)
             return
         if parsed.path == "/api/report":
-            self.send_json(get_json("report", sample_report()))
+            mall_id = parse_qs(parsed.query).get("mall_id", [configured_mall_id()])[0].lower()
+            report = get_json(f"report:{mall_id}")
+            if not report and mall_id == configured_mall_id():
+                report = get_json("report")
+            self.send_json(report or sample_report())
             return
         if parsed.path == "/api/status":
-            self.send_json({"cafe24_connected": bool(get_json("cafe24_token")), "has_real_report": bool(get_json("report"))})
+            mall_id = parse_qs(parsed.query).get("mall_id", [configured_mall_id()])[0].lower()
+            token = get_json(f"cafe24_token:{mall_id}")
+            report = get_json(f"report:{mall_id}")
+            if mall_id == configured_mall_id():
+                token = token or get_json("cafe24_token")
+                report = report or get_json("report")
+            self.send_json({"mall_id": mall_id, "cafe24_connected": bool(token), "has_real_report": bool(report), "malls": connected_malls()})
+            return
+        if parsed.path == "/api/malls":
+            self.send_json({"malls": connected_malls(), "default_mall_id": configured_mall_id()})
             return
         if parsed.path == "/health":
             self.send_json({"ok": True})
@@ -132,7 +175,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "관리자 키가 필요합니다."}, HTTPStatus.UNAUTHORIZED)
                 return
             try:
-                self.send_json(sync_last_30_days())
+                mall_id = parse_qs(parsed.query).get("mall_id", [configured_mall_id()])[0].lower()
+                if not valid_mall_id(mall_id):
+                    raise ValueError("올바른 쇼핑몰 ID가 아닙니다.")
+                self.send_json(sync_last_30_days(mall_id))
             except Exception as error:
                 self.send_json({"error": str(error)}, HTTPStatus.BAD_GATEWAY)
             return
